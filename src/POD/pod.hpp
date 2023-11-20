@@ -171,6 +171,7 @@ public:
     std::unique_ptr<PODKernel> & getKernel();
 
     void run();
+    void compute();
     void dump();
     void restore();
     void leave1out();    
@@ -270,8 +271,8 @@ private:
 
     void dumpMode(std::size_t ir);
 
-    void readSnapshot(const pod::SnapshotFile &snap, pod::PODField &fieldr);
     void readMode(std::size_t ir);
+    void readSnapshot(const pod::SnapshotFile &snap, pod::PODField &fieldr);
 
     double getCellVolume(long id);
     double getRawCellVolume(long rawIndex);
@@ -279,7 +280,7 @@ private:
     void diff(pod::PODField * _a, const pod::PODMode &b);
     void sum(pod::PODField * _a, const pod::PODMode &b);
     std::vector<double> fieldsl2norm(pod::PODField &snap);
-    std::vector<double> fieldsMax(pod::PODField &snap);    
+    std::vector<double> fieldsMax(pod::PODField &snap);
 
 #if BITPIT_ENABLE_MPI
     void initializeCommunicator(MPI_Comm communicator);

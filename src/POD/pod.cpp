@@ -835,39 +835,8 @@ std::unique_ptr<PODKernel> & POD::getKernel()
  */
 void POD::run()
 {
-    if (m_runMode == RunMode::COMPUTE) {
-
-        // Evaluate mean field and mesh
-        log::cout() << "pod : computing mean field and pod mesh... " << std::endl;
-        evalMeanMesh();
-
-        // Initialize ID list
-        fillListActiveIDs(m_filter);
-
-        // Evaluate correlation matrices
-        log::cout() << "pod : computing correlation matrix... " << std::endl;
-        evalCorrelation();
-
-        // Compute eigenvalues and eigenvectors
-        log::cout() << "pod : computing eigenvectors... " << std::endl;
-        evalEigen();
-
-        // Compute POD modes
-        log::cout() << "pod : computing pod modes... " << std::endl;
-        evalModes();
-
-    } else if (m_runMode == RunMode::RESTORE) {
-
-        log::cout() << "pod : restore... " << std::endl;
-        restore();
-
-    }
-
-    // Dump pod
-    if (m_writeMode != WriteMode::NONE) {
-        log::cout() << "pod : dumping... " << std::endl;
-        dump();
-    }
+    // Compute the POD
+    compute();
 
     // Evaluate reconstruction
     evalReconstruction();
@@ -3110,6 +3079,37 @@ void POD::sum(PiercedStorage<double> &fields, const pod::PODMode &mode,
             }
         }
 
+    }
+}
+
+/**
+ * Compute the POD over a set of given snapshots.
+ */
+void POD::compute()
+{
+    if (m_runMode == RunMode::COMPUTE) {
+        // Evaluate mean field and mesh
+        log::cout() << "pod : computing mean field and pod mesh... " << std::endl;
+        evalMeanMesh();
+        // Initialize ID list
+        fillListActiveIDs(m_filter);
+        // Evaluate correlation matrices
+        log::cout() << "pod : computing correlation matrix... " << std::endl;
+        evalCorrelation();
+        // Compute eigenvalues and eigenvectors
+        log::cout() << "pod : computing eigenvectors... " << std::endl;
+        evalEigen();
+        // Compute POD modes
+        log::cout() << "pod : computing pod modes... " << std::endl;
+        evalModes();
+        // Dump pod
+        if (m_writeMode != WriteMode::NONE) {
+            log::cout() << "pod : dumping... " << std::endl;
+            dump();
+        }
+    } else if (m_runMode == RunMode::RESTORE) {
+        log::cout() << "pod : restore... " << std::endl;
+        restore();
     }
 }
 
