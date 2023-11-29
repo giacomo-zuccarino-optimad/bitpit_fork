@@ -196,6 +196,9 @@ public:
             const std::unordered_set<long> *targetCells);
     std::vector<double> fieldsl2norm(pod::PODField &snap);
     std::vector<double> fieldsMax(pod::PODField &snap);
+    void buildFieldsWithCoeff(std::vector<std::vector<double>> coeff_mat, pod::PODField &recon);
+    void write(const pod::PODField &snap, std::string file_name) const;
+    void write(int mode_index, std::string file_name);
 
 private:
     std::unique_ptr<PODKernel>              m_podkernel;                /**< POD computational kernel */

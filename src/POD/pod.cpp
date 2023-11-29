@@ -1363,7 +1363,7 @@ void POD::reconstructFields(pod::PODField & field,  pod::PODField & reconi)
     reconi.mesh = field.mesh;
     reconi.mask = std::unique_ptr<PiercedStorage<bool>>(new PiercedStorage<bool>(*field.mask));
     evalReconstructionCoeffs(field);
-    buildFields(reconi);
+    buildFieldsWithCoeff(m_reconstructionCoeffs,reconi);
     if (m_errorMode != ErrorMode::NONE){
         if (m_errorMode == ErrorMode::SINGLE)
             initErrorMaps();
@@ -2344,22 +2344,21 @@ void POD::dumpField(const std::string &name, const pod::PODField &field) const
         m_filter.dump(dataStream);
         utils::binary::write(dataStream,std::size_t(m_nScalarFields));
         if (m_nScalarFields) {
-            for (std::size_t i = 0; i < m_nScalarFields; ++i)
+            for (std::size_t i = 0; i < m_nScalarFields; ++i) {
                 utils::binary::write(dataStream, m_nameScalarFields[i]);
-
+            }
             field.scalar->dump(dataStream);
         }
 
         utils::binary::write(dataStream,std::size_t(m_nVectorFields));
         if (m_nVectorFields) {
-            for (std::size_t i = 0; i < m_nVectorFields; ++i)
+            for (std::size_t i = 0; i < m_nVectorFields; ++i) {
                 utils::binary::write(dataStream, m_nameVectorFields[i]);
-
+            }
             field.vector->dump(dataStream);
         }
         binaryWriter.close();
     }
-
     // Dumping mesh
     {
         std::string header = name;// + "mesh";
@@ -2368,55 +2367,9 @@ void POD::dumpField(const std::string &name, const pod::PODField &field) const
         field.mesh->dump(dataStream);
         binaryWriter.close();
     }
-
+    // write VTK file
     if (m_writeMode == WriteMode::DEBUG) {
-        std::vector<std::string > datastring;
-        m_podkernel->getMesh()->getVTK().setDirectory(m_directory);
-        field.mesh->getVTK().setName(name);
-        std::vector<std::vector<double>> fields(m_nScalarFields, std::vector<double>(field.mesh->getInternalCellCount(), 0.0));
-        std::vector<std::vector<std::array<double,3>>> fieldv(m_nVectorFields, std::vector<std::array<double,3>>(field.mesh->getInternalCellCount(), {{0.0, 0.0, 0.0}}));
-        for (std::size_t isf = 0; isf < m_nScalarFields; ++isf) {
-            int i=0;
-            for (const Cell &cell : field.mesh->getCells()) {
-                if (cell.isInterior()) {
-                    long id = cell.getId();
-                    fields[isf][i] = field.scalar->at(id, isf);
-                    ++i;
-                }
-            }
-            field.mesh->getVTK().addData(m_nameScalarFields[isf], VTKFieldType::SCALAR, VTKLocation::CELL, fields[isf]);
-            datastring.push_back(m_nameScalarFields[isf]);
-        }
-
-        for (std::size_t ivf = 0; ivf < m_nVectorFields; ++ivf) {
-            int i=0;
-            for (const Cell &cell : field.mesh->getCells()) {
-                if (cell.isInterior()) {
-                    long id = cell.getId();
-                    fieldv[ivf][i] = field.vector->at(id, ivf);
-                    ++i;
-                }
-            }
-            std::string vname= m_nameVectorFields[ivf][0].substr(0,m_nameVectorFields[ivf][0].size()-2);
-            field.mesh->getVTK().addData(vname, VTKFieldType::VECTOR, VTKLocation::CELL, fieldv[ivf]);
-            datastring.push_back(vname);
-        }
-
-        std::vector<uint8_t> mask(field.mesh->getInternalCellCount(), 0);
-        int i=0;
-        for (const Cell &cell : field.mesh->getCells()) {
-            if (cell.isInterior()) {
-                long id = cell.getId();
-                mask[i] = m_filter[id];
-                ++i;
-            }
-        }
-        field.mesh->getVTK().addData("filter", VTKFieldType::SCALAR, VTKLocation::CELL, mask);
-        datastring.push_back("filter");
-        field.mesh->write();
-
-        for (std::size_t is=0; is < datastring.size(); ++is)
-            field.mesh->getVTK().removeData(datastring[is]);
+        write(field, name);
     }
 }
 
@@ -3110,6 +3063,184 @@ void POD::compute()
     } else if (m_runMode == RunMode::RESTORE) {
         log::cout() << "pod : restore... " << std::endl;
         restore();
+    }
+}
+
+/**
+ * Construct the linear combination of the POD modes with given input coefficients.
+ *
+ * \param[in] coeff_mat, coefficient matrix of dimension N_fields x N_modes to store the projection coefficient.
+ * \param[in,out] recon, PODField object to be populated with the linear combination.
+ */
+void POD::buildFieldsWithCoeff(std::vector<std::vector<double>> coeff_mat, pod::PODField &recon)
+{
+    // set up of the PODField members: scalar, vector, mesh and mask
+    recon.scalar = std::unique_ptr<pod::ScalarStorage>(new pod::ScalarStorage(m_nScalarFields, &m_podkernel->getMesh()->getCells()));
+    recon.vector = std::unique_ptr<pod::VectorStorage>(new pod::VectorStorage(m_nVectorFields, &m_podkernel->getMesh()->getCells()));
+    recon.scalar->fill(0.0);
+    recon.vector->fill(std::array<double, 3>{{0.0, 0.0, 0.0}});
+    recon.setMesh(m_podkernel->getMesh());
+    // Outer cycle over modes
+    for (std::size_t ir = 0; ir < m_nModes; ++ir) {
+        if (m_memoryMode == MemoryMode::MEMORY_LIGHT) {
+            readMode(ir);
+        }
+        // Outer cycle over cells
+        for (long id : m_listActiveIDs) {
+            if (m_nScalarFields) {
+                // Inner cycle over scalar fields
+                for (std::size_t isf = 0; isf < m_nScalarFields; ++isf) {
+                    double modes = m_modes[ir].scalar->at(id, isf);
+                    recon.scalar->at(id, isf) += modes * coeff_mat[isf][ir];
+                }
+            }
+            if (m_nVectorFields) {
+                // Inner cycle over vector fields
+                for (std::size_t ifv = 0; ifv < m_nVectorFields; ++ifv) {
+                    std::array<double,3> modev = m_modes[ir].vector->at(id,ifv);
+                    recon.vector->at(id, ifv) += modev * coeff_mat[m_nScalarFields+ifv][ir];
+                }
+            }
+        }
+        if (m_memoryMode == MemoryMode::MEMORY_LIGHT) {
+            m_modes[ir].clear();
+        }
+    }
+    if (m_useMean) {
+        sum(&recon, m_mean);
+    }
+}
+
+/**
+ * Write a POD Field as VTK files.
+ *
+ * \param[in] field, PODField object.
+ * \param[in] file_name, string with the desired file name for the VTK file.
+ */
+void POD::write(const pod::PODField &field, std::string file_name) const
+{
+    log::cout()  << "Writing snapshot ... " << std::endl;
+    // Set directory to write the VTK file.
+    m_podkernel->getMesh()->getVTK().setDirectory(m_directory);
+    // Set up empty string to store fields name
+    std::vector<std::string > datastring;
+    field.mesh->getVTK().setName(file_name);
+    // Set up matrix and vectors to populate the VTK file
+    std::vector<std::vector<double>> fields(m_nScalarFields, std::vector<double>(field.mesh->getInternalCellCount(), 0.0));
+    std::vector<std::vector<std::array<double,3>>> fieldv(m_nVectorFields, std::vector<std::array<double,3>>(field.mesh->getInternalCellCount(), {{0.0, 0.0, 0.0}}));
+    std::vector<uint8_t> field_mask(field.mesh->getInternalCellCount(), 0);
+    // Populate the scalar fields matrix
+    for (std::size_t isf = 0; isf < m_nScalarFields; ++isf) {
+        int i=0;
+        for (const Cell &cell : field.mesh->getCells()) {
+            if (cell.isInterior()){
+                long id = cell.getId();
+                fields[isf][i] = field.scalar->at(id, isf);
+                ++i;
+            }
+        }
+        // Add data to the VTK file and name them using the corresponding fields name of the pod object
+        field.mesh->getVTK().addData(m_nameScalarFields[isf], VTKFieldType::SCALAR, VTKLocation::CELL, fields[isf]);
+        datastring.push_back(m_nameScalarFields[isf]);
+    }
+    // Populate the vector fields matrix
+    for (std::size_t ivf = 0; ivf < m_nVectorFields; ++ivf) {
+        int i=0;
+        for (const Cell &cell : field.mesh->getCells()) {
+            if (cell.isInterior()) {
+                long id = cell.getId();
+                fieldv[ivf][i] = field.vector->at(id, ivf);
+                ++i;
+            }
+        }
+        std::string vname= m_nameVectorFields[ivf][0].substr(0,m_nameVectorFields[ivf][0].size()-2);
+        // add data to the VTK file and name them using the corresponding fields name of the pod object
+        field.mesh->getVTK().addData(vname, VTKFieldType::VECTOR, VTKLocation::CELL, fieldv[ivf]);
+        datastring.push_back(vname);
+    }
+    // Populate the mask vector
+    int j = 0;
+    for (const Cell &cell : field.mesh->getCells()) {
+        if (cell.isInterior()) {
+            long id = cell.getId();
+            field_mask[j] = m_filter[id];
+            ++j;
+        }
+    }
+    field.mesh->getVTK().addData("filter", VTKFieldType::SCALAR, VTKLocation::CELL, field_mask);
+    datastring.push_back("filter");
+    // Write the VTK file
+    field.mesh->write();
+    // Remove the data from the VTK member of the input PODField mesh
+    for (std::size_t is=0; is < datastring.size(); ++is) {
+        field.mesh->getVTK().removeData(datastring[is]);
+    }
+}
+
+/**
+ * Write a POD Mode as VTK files.
+ *
+ * \param[in] int, mode index.
+ * \param[in] file_name, string with the desired file name for the VTK file.
+ */
+void POD::write(int mode_index, std::string file_name)
+{
+    log::cout()  << "Writing mode ... " << std::endl;
+    // set up mesh
+    VolumeKernel* mode_mesh;
+    mode_mesh = m_podkernel->getMesh();
+    mode_mesh->getVTK().setName(file_name);
+    // set up empty string to store fields name
+    std::vector<std::string> datastring;
+    // set up matrix and vectors to populate the VTK file
+    std::vector<std::vector<double>> fields(m_nScalarFields, std::vector<double>(mode_mesh->getInternalCellCount(), 0.0));
+    std::vector<std::vector<std::array<double,3>>> fieldv(m_nVectorFields, std::vector<std::array<double,3>>(mode_mesh->getInternalCellCount(), {{0.0, 0.0, 0.0}}));
+    std::vector<uint8_t> mask(mode_mesh->getInternalCellCount(), 0);
+    // populate the scalar fields matrix
+    for (std::size_t isf = 0; isf < m_nScalarFields; ++isf) {
+        int i=0;
+        for (const Cell &cell : mode_mesh->getCells()) {
+            if (cell.isInterior()){
+                long id = cell.getId();
+                fields[isf][i] = m_modes[mode_index].scalar->at(id, isf);
+                ++i;
+            }
+        }
+        // add data to the VTK file and name them using the corresponding fields name of the pod object
+        mode_mesh->getVTK().addData(m_nameScalarFields[isf], VTKFieldType::SCALAR, VTKLocation::CELL, fields[isf]);
+        datastring.push_back(m_nameScalarFields[isf]);
+    }
+    // populate the vector fields matrix
+    for (std::size_t ivf = 0; ivf < m_nVectorFields; ++ivf) {
+        int i=0;
+        for (const Cell &cell : mode_mesh->getCells()) {
+            if (cell.isInterior()) {
+                long id = cell.getId();
+                fieldv[ivf][i] = m_modes[mode_index].vector->at(id, ivf);
+                ++i;
+            }
+        }
+        std::string vname= m_nameVectorFields[ivf][0].substr(0,m_nameVectorFields[ivf][0].size()-2);
+        // add data to the VTK file and name them using the corresponding fields name of the pod object
+        mode_mesh->getVTK().addData(vname, VTKFieldType::VECTOR, VTKLocation::CELL, fieldv[ivf]);
+        datastring.push_back(vname);
+    }
+    // populate the mask vector
+    int j=0;
+    for (const Cell &cell : mode_mesh->getCells()) {
+        if (cell.isInterior()) {
+            long id = cell.getId();
+            mask[j] = m_filter[id];
+            ++j;
+        }
+    }
+    mode_mesh->getVTK().addData("mask", VTKFieldType::SCALAR, VTKLocation::CELL, mask);
+    datastring.push_back("mask");
+    // write the VTK file
+    mode_mesh->write();
+    // remove the data from the VTK member of the input PODField mesh
+    for (std::size_t is=0; is < datastring.size(); ++is) {
+        mode_mesh->getVTK().removeData(datastring[is]);
     }
 }
 
