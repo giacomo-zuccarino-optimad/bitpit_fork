@@ -175,7 +175,7 @@ public:
     void dump();
     void restore();
     void leave1out();    
-
+    void readSnapshot(const pod::SnapshotFile &snap, pod::PODField &fieldr);
     void evalMeanMesh();
     void fillListActiveIDs(const PiercedStorage<bool> &bfield);
     void evalCorrelation();
@@ -194,6 +194,8 @@ public:
     void reconstructFields(PiercedStorage<double> &fields, VolumeKernel *mesh,
             std::map<std::string, std::size_t> targetFields,
             const std::unordered_set<long> *targetCells);
+    std::vector<double> fieldsl2norm(pod::PODField &snap);
+    std::vector<double> fieldsMax(pod::PODField &snap);
 
 private:
     std::unique_ptr<PODKernel>              m_podkernel;                /**< POD computational kernel */
@@ -272,15 +274,13 @@ private:
     void dumpMode(std::size_t ir);
 
     void readMode(std::size_t ir);
-    void readSnapshot(const pod::SnapshotFile &snap, pod::PODField &fieldr);
+
 
     double getCellVolume(long id);
     double getRawCellVolume(long rawIndex);
 
     void diff(pod::PODField * _a, const pod::PODMode &b);
     void sum(pod::PODField * _a, const pod::PODMode &b);
-    std::vector<double> fieldsl2norm(pod::PODField &snap);
-    std::vector<double> fieldsMax(pod::PODField &snap);
 
 #if BITPIT_ENABLE_MPI
     void initializeCommunicator(MPI_Comm communicator);
