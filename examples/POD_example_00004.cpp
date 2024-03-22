@@ -111,10 +111,10 @@ void run()
     /**<Set POD.*/    
     pod.setMeshType(POD::MeshType::VOLOCTREE);
     pod.setStaticMesh(true);
-    pod.setErrorMode(POD::ErrorMode::SINGLE);
+    pod.setErrorMode(POD::ErrorMode::NONE);
     pod.setWriteMode(POD::WriteMode::DEBUG);
     pod.setMemoryMode(POD::MemoryMode::MEMORY_NORMAL);
-    pod.setEnergyLevel(99.00);
+    pod.setEnergyLevel(100.00);
     pod.setUseMean(false);
     pod.setDirectory("pod");
     pod.setName("pod.test.solver");
@@ -154,6 +154,23 @@ void run()
     /* <Write the first mode as VTK file */
     pod.write(mode1_recon, "mode1_recon");
     pod.write(0, "mode1");
+    pod.dumpField("modo1dump",mode1_recon);
+
+    pod::PODField mode1_recon2;
+    pod::SnapshotFile snap ("pod", "modo1dump");
+    pod.readSnapshot(snap,mode1_recon2);
+
+    pod::PODField mode1_recon3;
+    pod.reconstructFields(mode1_recon2, mode1_recon3);
+    std::vector < std::vector<double>> test_mat2 = pod.getReconstructionCoeffs();
+    printMat(test_mat2);
+
+
+
+    //pod::PODField mode1_recon2;
+    //pod.reconstructFields(mode1_recon, mode1_recon2);
+    //std::vector < std::vector<double>> test_mat2 = pod.getReconstructionCoeffs();
+    //printMat(test_mat2);
 }
 
 /**
