@@ -46,6 +46,80 @@
 using namespace bitpit;
 
 /*
+ * Build a PODField object with difference between two PODField objects.
+ *
+ * \param[in] field1, minuend PODField.
+ * \param[in] field2, subtrahend PODField.
+ * \param[in] listActIds, list of active ids of the mesh of field1 and field2.
+ * \param[out] errorField, PODField with the difference between field1 and field2.
+ */
+pod::PODField buildErrorField (pod::PODField &field1, pod::PODField &field2, const std::unordered_set<long> listActIds)
+{
+    pod::PODField errorField;
+    errorField.scalar = std::unique_ptr<pod::ScalarStorage>(new pod::ScalarStorage(2, &field1.mesh->getCells()));
+    errorField.vector = std::unique_ptr<pod::VectorStorage>(new pod::VectorStorage(1, &field1.mesh->getCells()));
+    errorField.scalar->fill(0.0);
+    errorField.vector->fill(std::array<double, 3>{{0.0, 0.0, 0.0}});
+    errorField.mask = std::unique_ptr<PiercedStorage<bool>>(new PiercedStorage<bool>(1, &field1.mesh->getCells()));
+    errorField.mask->fill(0.0);
+    errorField.setMesh(field1.mesh);
+    for (long id : listActIds) {
+        for (std::size_t isf = 0; isf < 2; ++isf) {
+            double field1s = field1.scalar->at(id, isf);
+            double field2s = field2.scalar->at(id, isf);
+            errorField.scalar->at(id, isf) += field1s-field2s;
+        }
+        std::array<double,3> field1sv = field1.vector->at(id,0);
+        std::array<double,3> field2sv = field2.vector->at(id,0);
+        errorField.vector->at(id, 0) += field1sv-field2sv;
+        errorField.mask->at(id) = 1;
+    }
+    return errorField;
+}
+
+/*
+ * Build a PODField object with the relative difference between two PODField objects.
+ *
+ * \param[in] field1, minuend PODField.
+ * \param[in] field2, subtrahend PODField.
+ * \param[in] pod, POD object over which the two fields have been defined.
+ * \param[in] norm_type, L2 or Linf
+ * \param[out] errorField, PODField with the difference between field1 and field2.
+ */
+pod::PODField buildRelErrorField (pod::PODField &field1, pod::PODField &field2, POD &pod, std::string norm_type )
+{
+    pod::PODField errorField;
+    errorField.scalar = std::unique_ptr<pod::ScalarStorage>(new pod::ScalarStorage(2, &field1.mesh->getCells()));
+    errorField.vector = std::unique_ptr<pod::VectorStorage>(new pod::VectorStorage(1, &field1.mesh->getCells()));
+    errorField.scalar->fill(0.0);
+    errorField.vector->fill(std::array<double, 3>{{0.0, 0.0, 0.0}});
+    errorField.mask = std::unique_ptr<PiercedStorage<bool>>(new PiercedStorage<bool>(1, &field1.mesh->getCells()));
+    errorField.mask->fill(0.0);
+    errorField.setMesh(field1.mesh);
+    std::vector<double> vec;
+    if (norm_type == "L2") {
+        vec = pod.fieldsl2norm(field1);
+    }
+    else if (norm_type == "Linf") {
+        vec = pod.fieldsMax(field1);
+    }
+    const std::unordered_set<long> & listActIds = pod.getListActiveIDs();
+    for (long id : listActIds) {
+        for (std::size_t isf = 0; isf < 2; ++isf) {
+            double field1s = field1.scalar->at(id, isf);
+            double field2s = field2.scalar->at(id, isf);
+            errorField.scalar->at(id, isf) += (field1s-field2s)/vec[isf];
+        }
+        std::array<double,3> field1sv = field1.vector->at(id,0);
+        std::array<double,3> field2sv = field2.vector->at(id,0);
+        errorField.vector->at(id, 0) += (field1sv-field2sv)/vec[2];
+        errorField.mask->at(id) = 1;
+    }
+    return errorField;
+}
+
+
+/*
  * Print the L2 norm of each field of a PODField object.
  *
  * \param[in] field, PODField object.
@@ -64,6 +138,51 @@ void printL2norm (pod::PODField &field, POD &pod, std::string field_name)
     int M = vectorNames.size();
     for (int i=N; i<N+M; i++) {
         std::cout << "L2 norm of " << field_name << " " << vectorNames[i-N][0].substr(0,vectorNames[i-N][0].size()-2) << " is "<< vecL2[i] << std::endl;
+    }
+}
+
+/*
+ * Print the L infinity norm of each field of a PODField object.
+ *
+ * \param[in] field, PODField object.
+ * \param[in] pod, POD object defined on the same mesh.
+ * \param[in] field_name, string of the field name to display.
+ */
+void printLinfnorm (pod::PODField &field, POD &pod, std::string field_name)
+{
+    std::vector<double> vecLinf = pod.fieldsMax(field);
+    std::vector<std::string> scalarNames = pod.getScalarNames();
+    std::vector<std::array<std::string,3>> vectorNames= pod.getVectorNames();
+    int N = scalarNames.size();
+    for (int i=0; i<N; i++) {
+        std::cout << "L infinity norm of " << field_name << " " << scalarNames[i] << " is "<< vecLinf[i] << std::endl;
+    }
+    int M = vectorNames.size();
+    for (int i=N; i<N+M; i++) {
+        std::cout << "L infinity norm of " << field_name << " " << vectorNames[i-N][0].substr(0,vectorNames[i-N][0].size()-2) << " is "<< vecLinf[i] << std::endl;
+    }
+}
+
+void printMatFinal (std::vector < std::vector<double>> mat)
+{
+    std::cout << "mat = " << std::endl;
+    size_t M = mat.size();
+    size_t N = mat[0].size();
+    for (size_t i=0; i<M; i++) {
+        for (size_t j=0; j<N; j++) {
+            if (j == 0) {
+                std::cout << "[ "<< std::setprecision(12) << mat[i][j] ;
+            }
+            else if (j==(N-1)) {
+                std::cout << " , "  << std::setprecision(12) << mat[i][j] << " ]" << std::endl;
+            }
+            else {
+                std::cout << " , " << std::setprecision(12) << mat[i][j] ;
+            }
+            if (N==1) {
+                std::cout  << " ]" << std::endl;
+            }
+        }
     }
 }
 
@@ -166,11 +285,62 @@ void run()
     printMat(test_mat2);
 
 
+    // confronto tra snapshot e ricostruzione
 
-    //pod::PODField mode1_recon2;
-    //pod.reconstructFields(mode1_recon, mode1_recon2);
-    //std::vector < std::vector<double>> test_mat2 = pod.getReconstructionCoeffs();
-    //printMat(test_mat2);
+    const pod::SnapshotFile snap_0 ("./data", "test_set2.0");
+    pod::PODField field_0, field_0_recon;
+    pod.readSnapshot(snap_0,field_0);
+    pod.reconstructFields(field_0, field_0_recon);
+
+    const std::unordered_set<long> & listActIds = pod.getListActiveIDs();
+    pod::PODField error0 = buildErrorField(field_0, field_0_recon, listActIds);
+    pod::PODField error0relL2 = buildRelErrorField(field_0, field_0_recon, pod, "L2");
+    printL2norm(error0,pod,"reconstruction error");
+    printL2norm(error0relL2,pod,"reconstruction error (relative)");
+
+    // confronto tra matrici di ricostruzione
+    std::vector<std::vector<double> > rec0coeffMat = pod.getReconstructionCoeffs();
+    printMat(rec0coeffMat);
+    std::vector<std::vector<double> > proj0coeffMat = pod.projectField(field_0);
+    printMat(proj0coeffMat);
+
+    //confronto con la proiezione
+    pod::PODField proj_0;
+    pod.buildFieldsWithCoeff(proj0coeffMat, proj_0);
+    pod::PODField error0p = buildErrorField(field_0, proj_0, listActIds);
+    pod::PODField error0prelL2 = buildRelErrorField(field_0, proj_0, pod, "L2");
+    printL2norm(error0p,pod,"projection error");
+    printL2norm(error0prelL2,pod,"projection error (relative)");
+
+    /*
+     * ricostruzione e confronto con uno snapshot diverso da un generatore
+     */
+
+    std::cout << "confronto con angolo di attacco alpha = 1.5 " << std::endl;
+
+    const pod::SnapshotFile snap_15 ("./data", "test_set2.1.5");
+    pod::PODField field_15, field_15_recon;
+    pod.readSnapshot(snap_15,field_15);
+    pod.reconstructFields(field_15, field_15_recon);
+
+    pod::PODField error15 = buildErrorField(field_15, field_15_recon, listActIds);
+    pod::PODField error15relL2 = buildRelErrorField(field_15, field_15_recon, pod, "L2");
+    printL2norm(error15,pod,"reconstruction error");
+    printL2norm(error15relL2,pod,"reconstruction error (relative)");
+
+    // confronto tra matrici di ricostruzione
+    std::vector<std::vector<double> > rec15coeffMat = pod.getReconstructionCoeffs();
+    printMatFinal(rec15coeffMat);
+    std::vector<std::vector<double> > proj15coeffMat = pod.projectField(field_15);
+    printMatFinal(proj15coeffMat);
+
+    //confronto con la proiezione
+    pod::PODField proj_15;
+    pod.buildFieldsWithCoeff(proj15coeffMat, proj_15);
+    pod::PODField error15p = buildErrorField(field_15, proj_15, listActIds);
+    pod::PODField error15prelL2 = buildRelErrorField(field_15, proj_15, pod, "L2");
+    printL2norm(error15p,pod,"projection error");
+    printL2norm(error15prelL2,pod,"projection error (relative)");
 }
 
 /**

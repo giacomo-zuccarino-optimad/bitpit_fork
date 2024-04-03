@@ -1674,6 +1674,26 @@ void POD::evalEigen()
         }
     }
 
+    std::cout << "mat = " << std::endl;
+    size_t M = m_lambda.size();
+    size_t N = m_lambda[0].size();
+    for (size_t i=0; i<M; i++) {
+        for (size_t j=0; j<N; j++) {
+            if (j == 0) {
+                std::cout << "[ "<< m_lambda[i][j] ;
+            }
+            else if (j==(N-1)) {
+                std::cout << " , "  << m_lambda[i][j] << " ]" << std::endl;
+            }
+            else {
+                std::cout << " , " << m_lambda[i][j] ;
+            }
+            if (N==1) {
+                std::cout  << " ]" << std::endl;
+            }
+        }
+    }
+
 #if BITPIT_ENABLE_MPI
     long bufferSize = m_nModes;
     MPI_Bcast(&bufferSize, 1, MPI_LONG, 0, m_communicator);
@@ -3347,6 +3367,11 @@ void POD::_buildFieldsWithCoeff(std::vector<std::vector<double>> coeff_mat,
     }
     // Sum field and mean
     sum(fields, m_mean, scalarIds, podscalarIds, vectorIds, podvectorIds, targetCells);
+}
+
+std::vector<std::vector<double>> POD::getLambda()
+{
+    return m_lambda;
 }
 
 }

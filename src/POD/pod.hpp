@@ -206,6 +206,8 @@ public:
     void write(int mode_index, std::string file_name);
     std::vector<std::vector<double>> projectField(pod::PODField &field);
 
+    std::vector<std::vector<double>> getLambda();
+
 private:
     std::unique_ptr<PODKernel>              m_podkernel;                /**< POD computational kernel */
     MeshType                                m_meshType;                 /**< Type of POD mesh*/
